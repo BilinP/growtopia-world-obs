@@ -3,6 +3,7 @@ import json
 import os
 import re
 import sys
+import threading
 from pathlib import Path
 
 from obswebsocket import obsws, requests
@@ -19,6 +20,7 @@ DEFAULT_CONFIG = {
     "source_name": "WorldText",
     "log_path": "",
     "menu_text": "MENU",
+    "offline_text": "NOT IN GAME",
 }
 
 # World name comes from the world load line.
@@ -189,22 +191,40 @@ class LogWatcher:
     """Watches the log and calls on_change(text) whenever the world changes.
 
     If on_change returns False the update is treated as failed and retried on
-    the next log write.
+    the next log write. While the game is reported closed (set_game_running),
+    offline_text is shown instead of the world.
     """
 
-    def __init__(self, log_path, on_change, menu_text="MENU"):
+    def __init__(self, log_path, on_change, menu_text="MENU", offline_text="NOT IN GAME"):
         self.log_path = str(log_path)
         self.on_change = on_change
         self.menu_text = menu_text
+        self.offline_text = offline_text
+        self.game_running = True
         self.last = None
         self.observer = None
+        self._lock = threading.Lock()  # check() runs on the watchdog and game-poll threads
+
+    def set_game_running(self, running):
+        """Tell the watcher whether Growtopia is open (None = unknown, treated as open)."""
+        running = running is not False
+        if running != self.game_running:
+            self.game_running = running
+            self.check()
 
     def check(self):
-        try:
-            state = detect_state(read_log_lines(self.log_path), self.menu_text) or self.menu_text
-        except OSError as e:
-            print(f"Error reading log: {e}")
-            return
+        with self._lock:
+            self._check()
+
+    def _check(self):
+        if self.game_running:
+            try:
+                state = detect_state(read_log_lines(self.log_path), self.menu_text) or self.menu_text
+            except OSError as e:
+                print(f"Error reading log: {e}")
+                return
+        else:
+            state = self.offline_text
         if state != self.last and self.on_change(state) is not False:
             self.last = state
 

@@ -1,7 +1,8 @@
 # Growtopia World → OBS
 
 Shows the name of the Growtopia world you're in as a text source in OBS. It updates
-automatically when you join a world, warp to another one, or go back to the menu.
+automatically when you join a world, warp to another one, or go back to the menu,
+and shows `NOT IN GAME` while Growtopia is closed.
 
 It works by reading Growtopia's own `log.txt`. It does **not** touch the game,
 inject anything, or read game memory.
@@ -38,8 +39,10 @@ inject anything, or read game memory.
      (OBS shows them under **Show Connect Info**), then click **Connect**.
    - **2. OBS text source:** pick an existing text source, or leave the name as `WorldText` and
      click **Create in current scene**. Then style and position the text in OBS as you like.
-   - **3. Growtopia log file:** found automatically. If it shows ✖, open Growtopia once, or
-     click **Browse…** and pick `log.txt` from your Growtopia folder
+   - **When Growtopia is closed, show:** the placeholder text for when the game isn't open
+     (`NOT IN GAME` by default). Change it any time; it applies straight away.
+   - **3. Growtopia:** shows whether the game is open. The log file is found automatically.
+     If it shows ✖, open Growtopia once, or click **Browse…** and pick `log.txt` from your Growtopia folder
      (usually `%LOCALAPPDATA%\Growtopia\log.txt`).
 4. Click **Save & Start**. The window and your OBS text now show your current world (or `MENU`).
 
@@ -65,6 +68,7 @@ python stream-growtopia-world.py --headless
 | `source_name`  | OBS text source to update                       | `WorldText`   |
 | `log_path`     | Path to Growtopia's `log.txt`                   | auto-detected |
 | `menu_text`    | Text shown when you're not in a world           | `MENU`        |
+| `offline_text` | Text shown while Growtopia is closed            | `NOT IN GAME` |
 
 `config.json` contains your OBS password. It's in `.gitignore`, so don't share it.
 

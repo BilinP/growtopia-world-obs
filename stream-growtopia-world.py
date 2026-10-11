@@ -86,6 +86,7 @@ class App:
         self.cfg = gtworld.load_config()
         self.obs = None
         self.watcher = None
+        self.game_open = None  # last result of the Growtopia check
 
         root.title("Growtopia World → OBS")
         root.resizable(False, False)
@@ -130,6 +131,12 @@ class App:
         self.create_btn.grid(row=0, column=1, sticky="w", **pad)
         ttk.Label(f2, text="Pick an existing text source, or type a name and create it.",
                   foreground=COLORS["gray"]).grid(row=1, column=0, columnspan=2, sticky="w", **pad)
+        offline_row = ttk.Frame(f2)
+        offline_row.grid(row=2, column=0, columnspan=2, sticky="w", **pad)
+        ttk.Label(offline_row, text="When Growtopia is closed, show:").pack(side="left")
+        self.offline_text = tk.StringVar(value=self.cfg["offline_text"])
+        ttk.Entry(offline_row, textvariable=self.offline_text, width=18).pack(side="left", padx=(8, 0))
+        self.offline_text.trace_add("write", lambda *_: self.update_offline_text())
 
         # --- 3. Growtopia log ---
         f3 = ttk.LabelFrame(root, text=" 3. Growtopia ")
@@ -174,6 +181,7 @@ class App:
             "source_name": self.source.get().strip(),
             "log_path": self.log_path.get().strip(),
             "menu_text": self.cfg.get("menu_text", "MENU"),
+            "offline_text": self.offline_text.get(),
         }
 
     def check_log_path(self):
@@ -193,9 +201,24 @@ class App:
             else:
                 self.set_status(self.game_status, "○ Growtopia isn't open — start it to track your world",
                                 "red")
+            self.game_open = running
+            if self.watcher:
+                watcher = self.watcher
+                run_in_background(self.root, lambda: watcher.set_game_running(running), lambda *_: None)
             self.root.after(3000, self.poll_game)
 
         run_in_background(self.root, gtworld.is_growtopia_running, done)
+
+    def update_offline_text(self):
+        """Apply an edited placeholder right away if it's currently on screen."""
+        text = self.offline_text.get()
+        self.cfg["offline_text"] = text
+        if self.watcher:
+            gtworld.save_config(self.cfg)
+            self.watcher.offline_text = text
+            if not self.watcher.game_running:
+                self.watcher.last = None
+                run_in_background(self.root, self.watcher.check, lambda *_: None)
 
     # --- actions ---
     def auto_detect(self):
@@ -253,9 +276,12 @@ class App:
         name = self.source.get().strip() or "WorldText"
         self.source.set(name)
         obs = self.obs
-        # Start the new source on the current world rather than a placeholder.
-        text = gtworld.LogWatcher(self.log_path.get().strip(), None,
-                                  self.cfg.get("menu_text", "MENU")).current_state()
+        # Start the new source on what it should show right now.
+        if self.game_open is False:
+            text = self.offline_text.get()
+        else:
+            text = gtworld.LogWatcher(self.log_path.get().strip(), None,
+                                      self.cfg.get("menu_text", "MENU")).current_state()
 
         def work():
             # Ask OBS rather than trusting our list - the source may have been deleted.
@@ -355,7 +381,8 @@ class App:
             self.root.after(0, lambda: self.show_world(text, ok))
             return ok  # False -> watcher retries on the next log write
 
-        self.watcher = gtworld.LogWatcher(cfg["log_path"], on_change, cfg["menu_text"])
+        self.watcher = gtworld.LogWatcher(cfg["log_path"], on_change, cfg["menu_text"], cfg["offline_text"])
+        self.watcher.game_running = self.game_open is not False
         self.start_btn.config(text="Stop")
         run_in_background(self.root, self.watcher.start, lambda _, err: err and print(err))
 
@@ -402,11 +429,13 @@ def run_headless():
             print(f"Error updating OBS: {e}")
             return False
 
-    watcher = gtworld.LogWatcher(cfg["log_path"], on_change, cfg["menu_text"])
+    watcher = gtworld.LogWatcher(cfg["log_path"], on_change, cfg["menu_text"], cfg["offline_text"])
+    watcher.game_running = gtworld.is_growtopia_running() is not False
     watcher.start()
     try:
         while True:
-            time.sleep(1)
+            time.sleep(3)
+            watcher.set_game_running(gtworld.is_growtopia_running())
     except KeyboardInterrupt:
         pass
     finally:
