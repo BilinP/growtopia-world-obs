@@ -10,8 +10,35 @@ from obswebsocket import obsws, requests
 from watchdog.events import FileSystemEventHandler
 from watchdog.observers import Observer
 
-APP_DIR = Path(__file__).resolve().parent
-CONFIG_PATH = APP_DIR / "config.json"
+try:
+    from _version import __version__  # written by the release build
+except ImportError:
+    __version__ = "dev"
+
+APP_NAME = "Growtopia World OBS"
+
+
+def _config_dir():
+    """Next to the script when run from source; the user's app-data folder for the packaged app
+    (its own folder is temporary on Windows and read-only on macOS)."""
+    if not getattr(sys, "frozen", False):
+        return Path(__file__).resolve().parent
+    if sys.platform.startswith("win"):
+        base = Path(os.getenv("APPDATA", Path.home() / "AppData" / "Roaming"))
+    elif sys.platform == "darwin":
+        base = Path.home() / "Library" / "Application Support"
+    else:
+        base = Path(os.getenv("XDG_CONFIG_HOME", Path.home() / ".config"))
+    return base / APP_NAME
+
+
+CONFIG_PATH = _config_dir() / "config.json"
+
+
+def resource_path(relative):
+    """A file shipped with the app (inside the bundle when packaged)."""
+    base = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent))
+    return base / relative
 
 DEFAULT_CONFIG = {
     "obs_host": "localhost",
@@ -115,23 +142,24 @@ def load_config():
 
 
 def save_config(cfg):
+    CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
     CONFIG_PATH.write_text(json.dumps(cfg, indent=2), encoding="utf-8")
 
 
 def is_growtopia_running():
     """True if the Growtopia game process is running. None if it can't be checked."""
     import subprocess
+    # stdin=DEVNULL: the packaged Windows app has no console handles to inherit.
+    opts = {"capture_output": True, "text": True, "timeout": 5, "stdin": subprocess.DEVNULL}
     try:
         if sys.platform.startswith("win"):
             out = subprocess.run(["tasklist", "/FI", "IMAGENAME eq Growtopia.exe", "/NH"],
-                                 capture_output=True, text=True, timeout=5,
-                                 creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0)).stdout
+                                 creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0), **opts).stdout
             return "growtopia.exe" in out.lower()
-        if subprocess.run(["pgrep", "-ix", "growtopia"], capture_output=True, timeout=5).returncode == 0:
+        if subprocess.run(["pgrep", "-ix", "growtopia"], **opts).returncode == 0:
             return True
         # macOS: match the app bundle's executable (process names can be truncated).
-        return subprocess.run(["pgrep", "-if", r"growtopia\.app/contents/macos/"],
-                              capture_output=True, timeout=5).returncode == 0
+        return subprocess.run(["pgrep", "-if", r"growtopia\.app/contents/macos/"], **opts).returncode == 0
     except (OSError, subprocess.SubprocessError):
         return None
 

@@ -21,6 +21,10 @@ COLORS = {"gray": "#9a9ca3", "green": "#57d18b", "red": "#ff6b6b"}
 
 def apply_dark_theme(root):
     root.configure(bg=BG)
+    try:
+        root.iconphoto(True, tk.PhotoImage(file=str(gtworld.resource_path("packaging/icon.png"))))
+    except tk.TclError:
+        pass  # icon is cosmetic
     style = ttk.Style(root)
     style.theme_use("clam")  # the built-in theme that honours custom colors
     style.configure(".", background=BG, foreground=TEXT, fieldbackground=FIELD,
@@ -94,7 +98,7 @@ class App:
         self.watcher = None
         self.game_open = None  # last result of the Growtopia check
 
-        root.title("Growtopia World → OBS")
+        root.title("Growtopia World → OBS" + ("" if gtworld.__version__ == "dev" else f"  {gtworld.__version__}"))
         root.resizable(False, False)
         root.protocol("WM_DELETE_WINDOW", self.on_close)
         pad = {"padx": 8, "pady": 4}

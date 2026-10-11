@@ -1,0 +1,14 @@
+name: CI
+
+# Test and build the apps on every push and pull request (nothing is published).
+# The built apps can be downloaded from the run's Artifacts section.
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build:
+    uses: ./.github/workflows/build.yml
+    with:
+      version: dev

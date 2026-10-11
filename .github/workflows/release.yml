@@ -2,6 +2,7 @@ name: Release
 
 # Publishes a GitHub release:
 #  - daily, if anything was pushed to main since the last release (patch version bump)
+#  Each release ships the standalone Windows + macOS apps (see build.yml) and the source.
 #  - when a v* tag is pushed (that exact version)
 #  - on demand from the Actions tab
 on:
@@ -68,29 +69,17 @@ jobs:
             echo "sha=$sha"
           } >> "$GITHUB_OUTPUT"
 
-  test:
+
+  build:
     needs: plan
     if: needs.plan.outputs.release == 'true'
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [windows-latest, macos-latest, ubuntu-latest]
-    runs-on: ${{ matrix.os }}
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ needs.plan.outputs.sha }}
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-      - run: python -m pip install -r requirements.txt
-      - run: python -m py_compile gtworld.py stream-growtopia-world.py test_overlay.py
-      - run: python tests/test_gtworld.py
-      - if: runner.os != 'Windows'
-        run: bash -n start-mac.command
+    uses: ./.github/workflows/build.yml
+    with:
+      version: ${{ needs.plan.outputs.tag }}
+      ref: ${{ needs.plan.outputs.sha }}
 
   release:
-    needs: [plan, test]
+    needs: [plan, build]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -98,29 +87,52 @@ jobs:
           fetch-depth: 0
           ref: ${{ needs.plan.outputs.sha }}
 
-      - name: Build download
+      - name: Collect the apps
+        uses: actions/download-artifact@v4
+        with:
+          pattern: app-*
+          path: dist
+          merge-multiple: true
+
+      - name: Add the source download
         env:
           TAG: ${{ needs.plan.outputs.tag }}
         run: |
-          mkdir dist
           # git archive keeps the executable bit on start-mac.command
           git archive --format=zip --prefix="growtopia-world-obs-${TAG}/" \
-            -o "dist/growtopia-world-obs-${TAG}.zip" HEAD
+            -o "dist/growtopia-world-obs-${TAG}-source.zip" HEAD
+          ls -la dist
 
       - name: Write release notes
         env:
           TAG: ${{ needs.plan.outputs.tag }}
           PREVIOUS: ${{ needs.plan.outputs.previous }}
         run: |
+          has() { ls dist/*"$1"* >/dev/null 2>&1; }
           {
             echo "## Download"
             echo
-            echo "Download **growtopia-world-obs-${TAG}.zip** below and extract it, then:"
+            echo "No Python or setup needed: download the app for your computer from **Assets** below."
             echo
-            echo "- **Windows:** \`pip install -r requirements.txt\`, then \`python stream-growtopia-world.py\`"
-            echo "- **macOS:** double-click \`start-mac.command\`"
+            echo "| Computer | Download |"
+            echo "|---|---|"
+            echo "| Windows 10/11 | \`GrowtopiaWorldOBS-${TAG}-windows.exe\` |"
+            has macos-apple-silicon && echo "| Mac with Apple chip (M1 or newer) | \`GrowtopiaWorldOBS-${TAG}-macos-apple-silicon.zip\` |"
+            has macos-intel && echo "| Mac with Intel chip | \`GrowtopiaWorldOBS-${TAG}-macos-intel.zip\` |"
             echo
-            echo "Full setup steps are in the [README](https://github.com/${GITHUB_REPOSITORY}#setup)."
+            echo "Not sure which Mac you have? Apple menu → **About This Mac** → look at **Chip** (Apple M…) or **Processor** (Intel)."
+            echo
+            echo "### First launch"
+            echo
+            echo "The app isn't signed with a paid developer certificate, so your computer warns you once:"
+            echo
+            echo "- **Windows:** if you see \"Windows protected your PC\", click **More info** → **Run anyway**."
+            echo "- **macOS:** unzip it and drag **Growtopia World OBS** into Applications, then open it. If macOS says it can't be"
+            echo "  opened, go to **System Settings → Privacy & Security**, scroll down and click **Open Anyway**."
+            echo
+            echo "Then follow the [setup steps](https://github.com/${GITHUB_REPOSITORY}#setup) (turn on OBS's WebSocket server, click **Save & Start**)."
+            echo
+            echo "Developers: \`growtopia-world-obs-${TAG}-source.zip\` has the Python source."
             echo
             echo "## Changes"
             echo
@@ -140,7 +152,7 @@ jobs:
           TAG: ${{ needs.plan.outputs.tag }}
           SHA: ${{ needs.plan.outputs.sha }}
         run: |
-          gh release create "$TAG" dist/*.zip \
+          gh release create "$TAG" dist/* \
             --title "$TAG" \
             --notes-file notes.md \
             --target "$SHA"
