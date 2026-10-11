@@ -84,6 +84,20 @@ def save_config(cfg):
     CONFIG_PATH.write_text(json.dumps(cfg, indent=2), encoding="utf-8")
 
 
+def is_growtopia_running():
+    """True if the Growtopia game process is running. None if it can't be checked."""
+    import subprocess
+    try:
+        if sys.platform.startswith("win"):
+            out = subprocess.run(["tasklist", "/FI", "IMAGENAME eq Growtopia.exe", "/NH"],
+                                 capture_output=True, text=True, timeout=5,
+                                 creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0)).stdout
+            return "growtopia.exe" in out.lower()
+        return subprocess.run(["pgrep", "-ix", "growtopia"], capture_output=True, timeout=5).returncode == 0
+    except (OSError, subprocess.SubprocessError):
+        return None
+
+
 # === Log parsing ===
 
 def read_log_lines(path):
@@ -132,8 +146,8 @@ class OBS:
         return [i["inputName"] for i in inputs
                 if i.get("inputKind", "").startswith(("text_gdiplus", "text_ft2"))]
 
-    def create_text_source(self, name):
-        """Create a text source in the current scene."""
+    def create_text_source(self, name, text="MENU"):
+        """Create a text source showing `text` in the current scene."""
         kinds = self._call(requests.GetInputKindList(unversioned=False)).get("inputKinds", [])
         kind = next((k for k in TEXT_INPUT_KINDS if k in kinds), None)
         if not kind:
@@ -141,8 +155,20 @@ class OBS:
         scene = self._call(requests.GetCurrentProgramScene())
         scene_name = scene.get("currentProgramSceneName") or scene.get("sceneName")
         self._call(requests.CreateInput(sceneName=scene_name, inputName=name, inputKind=kind,
-                                        inputSettings={"text": "MENU"}, sceneItemEnabled=True))
+                                        inputSettings={"text": text}, sceneItemEnabled=True))
         return scene_name
+
+    def on_source_change(self, callback):
+        """Call callback(event, data) when an input is created, removed or renamed in OBS.
+
+        event is "InputCreated", "InputRemoved" or "InputNameChanged". Runs on the
+        websocket thread.
+        """
+        def handler(event):
+            name = type(event).__name__
+            if name in ("InputCreated", "InputRemoved", "InputNameChanged"):
+                callback(name, event.datain)
+        self.ws.register(handler)
 
     def set_text(self, source, text):
         self._call(requests.SetInputSettings(inputName=source, inputSettings={"text": text}))
@@ -160,7 +186,11 @@ class _Handler(FileSystemEventHandler):
 
 
 class LogWatcher:
-    """Watches the log and calls on_change(text) whenever the world changes."""
+    """Watches the log and calls on_change(text) whenever the world changes.
+
+    If on_change returns False the update is treated as failed and retried on
+    the next log write.
+    """
 
     def __init__(self, log_path, on_change, menu_text="MENU"):
         self.log_path = str(log_path)
@@ -175,9 +205,14 @@ class LogWatcher:
         except OSError as e:
             print(f"Error reading log: {e}")
             return
-        if state != self.last:
+        if state != self.last and self.on_change(state) is not False:
             self.last = state
-            self.on_change(state)
+
+    def current_state(self):
+        try:
+            return detect_state(read_log_lines(self.log_path), self.menu_text) or self.menu_text
+        except OSError:
+            return self.menu_text
 
     def start(self):
         self.check()  # show the current state immediately
