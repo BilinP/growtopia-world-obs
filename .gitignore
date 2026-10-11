@@ -1,0 +1,7 @@
+# Local settings (contains your OBS password)
+config.json
+
+__pycache__/
+*.pyc
+.venv/
+venv/
