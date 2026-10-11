@@ -1,0 +1,146 @@
+name: Release
+
+# Publishes a GitHub release:
+#  - daily, if anything was pushed to main since the last release (patch version bump)
+#  - when a v* tag is pushed (that exact version)
+#  - on demand from the Actions tab
+on:
+  schedule:
+    - cron: "0 12 * * *"  # every day at 12:00 UTC
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      release: ${{ steps.plan.outputs.release }}
+      tag: ${{ steps.plan.outputs.tag }}
+      previous: ${{ steps.plan.outputs.previous }}
+      sha: ${{ steps.plan.outputs.sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # full history and tags
+
+      - id: plan
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            tag="${GITHUB_REF_NAME}"
+            sha="$(git rev-list -n 1 "$tag")"
+            previous="$(git describe --tags --abbrev=0 --match 'v*' "${sha}^" 2>/dev/null || true)"
+          else
+            git checkout -q origin/main
+            sha="$(git rev-parse HEAD)"
+            previous="$(git describe --tags --abbrev=0 --match 'v*' 2>/dev/null || true)"
+            if [ -z "$previous" ]; then
+              tag="v1.0.0"
+            elif [ "$(git rev-list --count "${previous}..HEAD")" = "0" ]; then
+              echo "No new commits since $previous - nothing to release."
+              echo "release=false" >> "$GITHUB_OUTPUT"
+              exit 0
+            else
+              IFS=. read -r major minor patch <<< "${previous#v}"
+              tag="v${major}.${minor}.$((patch + 1))"
+            fi
+          fi
+          if gh release view "$tag" >/dev/null 2>&1; then
+            echo "Release $tag already exists - nothing to do."
+            echo "release=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "Will release $tag ($sha), previous: ${previous:-none}"
+          {
+            echo "release=true"
+            echo "tag=$tag"
+            echo "previous=$previous"
+            echo "sha=$sha"
+          } >> "$GITHUB_OUTPUT"
+
+  test:
+    needs: plan
+    if: needs.plan.outputs.release == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.plan.outputs.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install -r requirements.txt
+      - run: python -m py_compile gtworld.py stream-growtopia-world.py test_overlay.py
+      - run: python tests/test_gtworld.py
+      - if: runner.os != 'Windows'
+        run: bash -n start-mac.command
+
+  release:
+    needs: [plan, test]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ needs.plan.outputs.sha }}
+
+      - name: Build download
+        env:
+          TAG: ${{ needs.plan.outputs.tag }}
+        run: |
+          mkdir dist
+          # git archive keeps the executable bit on start-mac.command
+          git archive --format=zip --prefix="growtopia-world-obs-${TAG}/" \
+            -o "dist/growtopia-world-obs-${TAG}.zip" HEAD
+
+      - name: Write release notes
+        env:
+          TAG: ${{ needs.plan.outputs.tag }}
+          PREVIOUS: ${{ needs.plan.outputs.previous }}
+        run: |
+          {
+            echo "## Download"
+            echo
+            echo "Download **growtopia-world-obs-${TAG}.zip** below and extract it, then:"
+            echo
+            echo "- **Windows:** \`pip install -r requirements.txt\`, then \`python stream-growtopia-world.py\`"
+            echo "- **macOS:** double-click \`start-mac.command\`"
+            echo
+            echo "Full setup steps are in the [README](https://github.com/${GITHUB_REPOSITORY}#setup)."
+            echo
+            echo "## Changes"
+            echo
+            if [ -n "$PREVIOUS" ]; then
+              git log --no-merges --format='- %s (%h)' "${PREVIOUS}..HEAD"
+              echo
+              echo "**Full changelog:** https://github.com/${GITHUB_REPOSITORY}/compare/${PREVIOUS}...${TAG}"
+            else
+              echo "First public release."
+            fi
+          } > notes.md
+          cat notes.md
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.plan.outputs.tag }}
+          SHA: ${{ needs.plan.outputs.sha }}
+        run: |
+          gh release create "$TAG" dist/*.zip \
+            --title "$TAG" \
+            --notes-file notes.md \
+            --target "$SHA"

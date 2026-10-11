@@ -19,7 +19,9 @@ inject anything, or read game memory.
 
 ## Install
 
-Download this repo (**Code → Download ZIP**, then extract it) or `git clone` it.
+Download the latest **`growtopia-world-obs-vX.Y.Z.zip`** from
+[Releases](https://github.com/BilinP/growtopia-world-obs/releases/latest) and extract it
+(or `git clone` this repo).
 
 **Windows:** open a terminal in the folder and install the dependencies:
 
@@ -117,6 +119,20 @@ World::Load: Version 27. f: 64, Name: MYWORLD      → shows "MYWORLD"
 The app watches the file and reads it from the bottom up. The newest of those lines decides what
 is shown. Note that `Destroy: WorldScreen` is ignored on purpose: when you warp between worlds,
 the game destroys the *old* world's screen after the new world has already loaded.
+
+## Running the tests
+
+```
+python tests/test_gtworld.py
+```
+
+## Releases
+
+A new release is published automatically: every day at 12:00 UTC, GitHub Actions checks whether
+anything was pushed to `main` since the last release. If so, it runs the tests on Windows, macOS
+and Linux and publishes the next version (`v1.0.0` → `v1.0.1` → …) with a changelog and a
+download ZIP. Pushing a tag like `v1.1.0` publishes that version immediately, and the workflow can
+also be run by hand from the **Actions** tab.
 
 ## Disclaimer
 
