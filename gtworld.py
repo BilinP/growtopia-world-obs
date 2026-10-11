@@ -29,6 +29,10 @@ WORLD_PATTERN = re.compile(r"World::Load:.*Name:\s*(\w+)", re.IGNORECASE)
 # the old world's screen is destroyed *after* the new world has loaded.
 MENU_PATTERN = re.compile(r"CreateScreen:\s*(WorldSelectScreen|ConnectionScreen)", re.IGNORECASE)
 
+# A font that exists on each platform (Tk silently falls back if it doesn't).
+UI_FONT = ("Segoe UI" if sys.platform.startswith("win")
+           else "Helvetica Neue" if sys.platform == "darwin" else "DejaVu Sans")
+
 # OBS text source kinds, newest first (Windows GDI+, then FreeType for macOS/Linux).
 TEXT_INPUT_KINDS = ("text_gdiplus_v3", "text_gdiplus_v2", "text_gdiplus",
                     "text_ft2_source_v2", "text_ft2_source")
@@ -36,15 +40,41 @@ TEXT_INPUT_KINDS = ("text_gdiplus_v3", "text_gdiplus_v2", "text_gdiplus",
 
 # === Paths & config ===
 
+def log_path_candidates():
+    """Places Growtopia's log.txt may be, most likely first."""
+    if sys.platform.startswith("win"):
+        return [Path(os.getenv("LOCALAPPDATA", Path.home() / "AppData" / "Local")) / "Growtopia" / "log.txt"]
+    if sys.platform == "darwin":
+        lib = Path.home() / "Library"
+        found = [lib / "Application Support" / "Growtopia" / "log.txt",
+                 lib / "Growtopia" / "log.txt",
+                 lib / "Caches" / "Growtopia" / "log.txt",
+                 lib / "Logs" / "Growtopia" / "log.txt"]
+        # App Store / sandboxed builds keep their files inside a container.
+        for parent in (lib / "Containers", lib / "Group Containers"):
+            try:
+                containers = [c for c in parent.iterdir() if "growtopia" in c.name.lower()]
+            except OSError:
+                containers = []
+            for c in containers:
+                found += [c / "Data" / "Library" / "Application Support" / "Growtopia" / "log.txt",
+                          c / "Data" / "Library" / "Application Support" / "log.txt",
+                          c / "Data" / "Documents" / "log.txt"]
+        found.append(Path("/Applications/Growtopia.app/Contents/Resources/log.txt"))
+        return found
+    return [Path.home() / ".growtopia" / "log.txt"]
+
+
 def default_log_path():
+    """The env override, else the most recently written existing candidate, else the likeliest one."""
     env = os.getenv("GROWTOPIA_LOG_PATH") or os.getenv("GROWTOPIA_LOG")
     if env:
         return Path(env)
-    if sys.platform.startswith("win"):
-        return Path(os.getenv("LOCALAPPDATA", Path.home() / "AppData" / "Local")) / "Growtopia" / "log.txt"
-    if sys.platform == "darwin":
-        return Path.home() / "Library" / "Application Support" / "Growtopia" / "log.txt"
-    return Path.home() / ".growtopia" / "log.txt"
+    candidates = log_path_candidates()
+    existing = [p for p in candidates if p.is_file()]
+    if existing:
+        return max(existing, key=lambda p: p.stat().st_mtime)
+    return candidates[0]
 
 
 def obs_websocket_config_path():
@@ -77,8 +107,10 @@ def load_config():
         cfg.update(json.loads(CONFIG_PATH.read_text(encoding="utf-8")))
     except (OSError, ValueError):
         pass
-    if not cfg["log_path"]:
-        cfg["log_path"] = str(default_log_path())
+    if not cfg["log_path"] or not Path(cfg["log_path"]).is_file():
+        detected = default_log_path()
+        if not cfg["log_path"] or detected.is_file():
+            cfg["log_path"] = str(detected)
     return cfg
 
 
@@ -95,7 +127,11 @@ def is_growtopia_running():
                                  capture_output=True, text=True, timeout=5,
                                  creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0)).stdout
             return "growtopia.exe" in out.lower()
-        return subprocess.run(["pgrep", "-ix", "growtopia"], capture_output=True, timeout=5).returncode == 0
+        if subprocess.run(["pgrep", "-ix", "growtopia"], capture_output=True, timeout=5).returncode == 0:
+            return True
+        # macOS: match the app bundle's executable (process names can be truncated).
+        return subprocess.run(["pgrep", "-if", r"growtopia\.app/contents/macos/"],
+                              capture_output=True, timeout=5).returncode == 0
     except (OSError, subprocess.SubprocessError):
         return None
 
@@ -183,8 +219,13 @@ class _Handler(FileSystemEventHandler):
         self.watcher = watcher
 
     def on_modified(self, event):
-        if os.path.abspath(getattr(event, "src_path", "") or "") == os.path.abspath(self.watcher.log_path):
+        if _same_path(getattr(event, "src_path", "") or "", self.watcher.log_path):
             self.watcher.check()
+
+
+def _same_path(a, b):
+    # realpath: macOS reports some paths through symlinks; normcase: case-insensitive filesystems.
+    return os.path.normcase(os.path.realpath(a)) == os.path.normcase(os.path.realpath(b))
 
 
 class LogWatcher:

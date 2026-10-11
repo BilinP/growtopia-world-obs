@@ -40,9 +40,9 @@ def main():
     root.geometry("+40+40")
     root.configure(bg="black")
     tk.Label(root, text="WorldText (test)", fg="gray", bg="black",
-             font=("Segoe UI", 9)).pack(padx=12, pady=(8, 0))
+             font=(gtworld.UI_FONT, 9)).pack(padx=12, pady=(8, 0))
     label = tk.Label(root, text="...", fg="white", bg="black",
-                     font=("Segoe UI", 28, "bold"))
+                     font=(gtworld.UI_FONT, 28, "bold"))
     label.pack(padx=20, pady=(0, 12))
 
     def on_change(text):

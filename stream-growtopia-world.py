@@ -50,7 +50,13 @@ def apply_dark_theme(root):
 
 
 def dark_title_bar(root):
-    """Ask Windows 10/11 for a dark title bar. Silently does nothing elsewhere."""
+    """Ask Windows 10/11 or macOS for a dark title bar. Silently does nothing elsewhere."""
+    if sys.platform == "darwin":
+        try:  # Tk 8.6.10+; older Tk just keeps the system appearance
+            root.tk.call("::tk::unsupported::MacWindowStyle", "appearance", root._w, "darkaqua")
+        except tk.TclError:
+            pass
+        return
     if not sys.platform.startswith("win"):
         return
     try:
@@ -155,7 +161,7 @@ class App:
         # --- Run ---
         f4 = ttk.Frame(root)
         f4.grid(row=3, column=0, sticky="ew", padx=10, pady=(6, 10))
-        self.world = ttk.Label(f4, text="—", font=("Segoe UI", 22, "bold"))
+        self.world = ttk.Label(f4, text="—", font=(gtworld.UI_FONT, 22, "bold"))
         self.world.pack(side="left")
         self.start_btn = ttk.Button(f4, text="Save & Start", command=self.toggle)
         self.start_btn.pack(side="right")
@@ -347,7 +353,7 @@ class App:
 
     def browse_log(self):
         path = filedialog.askopenfilename(title="Find Growtopia's log.txt",
-                                          filetypes=[("Log file", "log.txt"), ("All files", "*.*")])
+                                          filetypes=[("Log file", "*.txt"), ("All files", "*")])
         if path:
             self.log_path.set(path)
 

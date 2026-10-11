@@ -9,29 +9,35 @@ inject anything, or read game memory.
 
 ## Requirements
 
-- Windows (macOS/Linux paths are included but untested)
-- [Python 3.7+](https://www.python.org/downloads/) (tick **"Add python.exe to PATH"** in the installer)
+- **Windows** or **macOS** (Linux paths are included but untested)
+- [Python 3.7+](https://www.python.org/downloads/)
+  - Windows: tick **"Add python.exe to PATH"** in the installer
+  - macOS: use the python.org installer. It includes Tk, which the window needs; Apple's built-in
+    `python3` often doesn't.
 - [OBS Studio 28+](https://obsproject.com/) (has the WebSocket server built in)
 - Growtopia
 
 ## Install
 
-1. Download this repo (**Code → Download ZIP**, then extract it) or `git clone` it.
-2. Open a terminal in the folder and install the dependencies:
+Download this repo (**Code → Download ZIP**, then extract it) or `git clone` it.
 
-   ```
-   pip install -r requirements.txt
-   ```
+**Windows:** open a terminal in the folder and install the dependencies:
+
+```
+pip install -r requirements.txt
+```
+
+**macOS:** nothing to install by hand. Double-click **`start-mac.command`** and it sets everything
+up on first run. If macOS says it can't be opened because it's from an unidentified developer,
+right-click it, choose **Open**, then confirm **Open** once.
 
 ## Setup
 
 1. **Turn on OBS's WebSocket server:** in OBS go to **Tools → WebSocket Server Settings** and
    tick **Enable WebSocket server**. Keep authentication on.
 2. **Start the app:**
-
-   ```
-   python stream-growtopia-world.py
-   ```
+   - Windows: `python stream-growtopia-world.py`
+   - macOS: double-click `start-mac.command` (or run `./start-mac.command` in Terminal)
 
 3. A setup window opens:
    - **1. Connect to OBS:** your OBS port and password are filled in automatically from OBS's
@@ -42,8 +48,13 @@ inject anything, or read game memory.
    - **When Growtopia is closed, show:** the placeholder text for when the game isn't open
      (`NOT IN GAME` by default). Change it any time; it applies straight away.
    - **3. Growtopia:** shows whether the game is open. The log file is found automatically.
-     If it shows ✖, open Growtopia once, or click **Browse…** and pick `log.txt` from your Growtopia folder
-     (usually `%LOCALAPPDATA%\Growtopia\log.txt`).
+     If it shows ✖, open Growtopia once, or click **Browse…** and pick `log.txt` from your
+     Growtopia folder:
+     - Windows: `%LOCALAPPDATA%\Growtopia\log.txt`
+     - macOS: the app checks `~/Library/Application Support/Growtopia/`, `~/Library/Growtopia/` and the
+       Growtopia app container under `~/Library/Containers/`. If yours is somewhere else, use
+       **Browse…** (press **Cmd+Shift+.** in the file picker to show hidden folders like `Library`)
+       and please open an issue saying where it was.
 4. Click **Save & Start**. The window and your OBS text now show your current world (or `MENU`).
 
 Your settings are saved to `config.json` next to the script, so next time you can just start the app and click **Save & Start**.
@@ -55,6 +66,8 @@ After setting up once, you can run it in a terminal without the setup window:
 ```
 python stream-growtopia-world.py --headless
 ```
+
+On macOS: `./start-mac.command --headless`
 
 ### Settings
 
@@ -77,6 +90,8 @@ python stream-growtopia-world.py --headless
 ```
 python test_overlay.py
 ```
+
+(On macOS, after running `start-mac.command` once: `.venv/bin/python test_overlay.py`)
 
 This checks the log parser, then opens a small always-on-top window that shows the world
 the app currently detects. Join and leave worlds in Growtopia to see it change. Close the window to stop.
