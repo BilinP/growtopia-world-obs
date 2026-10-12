@@ -101,6 +101,35 @@ def test_macos_log_detection():
                 os.environ[key] = value
 
 
+def test_launch_at_login_roundtrip():
+    # Uses its own entry name so a real "Open when I log in" setting is never touched.
+    name = "GrowtopiaWorldOBS-test"
+    home = tempfile.mkdtemp()
+    saved = {k: os.environ.get(k) for k in ("HOME", "XDG_CONFIG_HOME")}
+    os.environ["HOME"] = home  # macOS/Linux write a file under the home folder
+    os.environ.pop("XDG_CONFIG_HOME", None)
+    script = Path(__file__).resolve().parent.parent / "stream-growtopia-world.py"
+    try:
+        gtworld.set_launch_at_login(False, script, name=name)
+        assert not gtworld.launch_at_login_enabled(name)
+        gtworld.set_launch_at_login(True, script, name=name)
+        assert gtworld.launch_at_login_enabled(name)
+        gtworld.set_launch_at_login(False, script, name=name)
+        assert not gtworld.launch_at_login_enabled(name)
+    finally:
+        gtworld.set_launch_at_login(False, script, name=name)
+        for key, value in saved.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
+
+
+def test_launch_command_starts_minimised():
+    cmd = gtworld._launch_command("stream-growtopia-world.py")
+    assert cmd[-1] == "--minimized" and cmd[-2].endswith("stream-growtopia-world.py")
+
+
 if __name__ == "__main__":
     tests = [(name, fn) for name, fn in sorted(globals().items()) if name.startswith("test_")]
     for name, fn in tests:

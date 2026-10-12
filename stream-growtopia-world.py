@@ -97,6 +97,7 @@ class App:
         self.obs = None
         self.watcher = None
         self.game_open = None  # last result of the Growtopia check
+        self.connecting = False
 
         root.title("Growtopia World → OBS" + ("" if gtworld.__version__ == "dev" else f"  {gtworld.__version__}"))
         root.resizable(False, False)
@@ -162,18 +163,35 @@ class App:
         self.check_log_path()
         self.poll_game()
 
+        # --- Options ---
+        opts = ttk.Frame(root)
+        opts.grid(row=3, column=0, sticky="w", padx=14, pady=(6, 0))
+        self.auto_start = tk.BooleanVar(value=self.cfg.get("auto_start", True))
+        ttk.Checkbutton(opts, text="Start automatically when the app opens", variable=self.auto_start,
+                        command=self.toggle_auto_start).pack(anchor="w")
+        self.login = tk.BooleanVar(value=gtworld.launch_at_login_enabled())
+        ttk.Checkbutton(opts, text="Open when I log in to my computer", variable=self.login,
+                        command=self.toggle_login).pack(anchor="w", pady=(2, 0))
+
         # --- Run ---
         f4 = ttk.Frame(root)
-        f4.grid(row=3, column=0, sticky="ew", padx=10, pady=(6, 10))
+        f4.grid(row=4, column=0, sticky="ew", padx=10, pady=(6, 10))
         self.world = ttk.Label(f4, text="—", font=(gtworld.UI_FONT, 22, "bold"))
         self.world.pack(side="left")
         self.start_btn = ttk.Button(f4, text="Save & Start", command=self.toggle)
         self.start_btn.pack(side="right")
 
-        # First run: fill in OBS's settings for the user. Then try connecting straight away.
-        if not gtworld.CONFIG_PATH.exists():
+        # First run: fill in OBS's settings for the user. Then try connecting straight away,
+        # and keep the connection alive from then on.
+        set_up = gtworld.CONFIG_PATH.exists()
+        if not set_up:
             self.auto_detect()
         self.connect()
+        root.after(5000, self.watch_obs)
+        if set_up and self.auto_start.get():
+            root.after(200, self.start)  # doesn't need OBS yet - it catches up once connected
+        if "--minimized" in sys.argv:
+            root.iconify()
 
     # --- helpers ---
     def set_status(self, label, text, color):
@@ -192,6 +210,7 @@ class App:
             "log_path": self.log_path.get().strip(),
             "menu_text": self.cfg.get("menu_text", "MENU"),
             "offline_text": self.offline_text.get(),
+            "auto_start": self.auto_start.get(),
         }
 
     def check_log_path(self):
@@ -245,16 +264,19 @@ class App:
         else:
             self.set_status(self.obs_status, "Settings detected, but the server is off. " + OBS_HELP, "red")
 
-    def connect(self):
+    def connect(self, quiet=False):
+        """Connect to OBS. quiet=True is an automatic retry: no 'Connecting…' flicker."""
+        if self.connecting:
+            return
         cfg = self.current_cfg()
-        if self.watcher:
-            self.stop()
         if self.obs:
             self.obs.disconnect()
             self.obs = None
         obs = gtworld.OBS(cfg["obs_host"], cfg["obs_port"], cfg["obs_password"])
-        self.connect_btn.config(state="disabled")
-        self.set_status(self.obs_status, "Connecting…", "gray")
+        self.connecting = True
+        if not quiet:
+            self.connect_btn.config(state="disabled")
+            self.set_status(self.obs_status, "Connecting…", "gray")
 
         def work():
             obs.connect()
@@ -263,12 +285,13 @@ class App:
             return obs.text_sources()
 
         def done(sources, error):
+            self.connecting = False
             self.connect_btn.config(state="normal")
             if error:
                 obs.disconnect()
                 self.create_btn.config(state="disabled")
-                self.set_status(self.obs_status, f"Couldn't connect: {error}\nMake sure OBS is open. "
-                                + OBS_HELP, "red")
+                self.set_status(self.obs_status, "Waiting for OBS — retrying every 5 seconds. Make sure OBS is "
+                                f"open. {OBS_HELP}\n({error})", "red")
                 return
             self.obs = obs
             self.create_btn.config(state="normal")
@@ -279,8 +302,48 @@ class App:
             if self.source.get() not in sources:
                 msg += f" '{self.source.get()}' doesn't exist yet — click 'Create in current scene'."
             self.set_status(self.obs_status, msg, "green")
+            if self.watcher:  # (re)connected while tracking: bring OBS up to date
+                self.resend()
 
         run_in_background(self.root, work, done)
+
+    def watch_obs(self):
+        """Every 5 seconds: reconnect if we're not connected, or check the connection is still alive."""
+        def done(_result, error):
+            if error and obs is self.obs:
+                obs.disconnect()
+                self.obs = None
+                self.create_btn.config(state="disabled")
+                self.set_status(self.obs_status, "Lost connection to OBS — reconnecting…", "red")
+                self.connect(quiet=True)
+            self.root.after(5000, self.watch_obs)
+
+        obs = self.obs
+        if self.connecting:
+            self.root.after(5000, self.watch_obs)
+        elif obs is None:
+            self.connect(quiet=True)
+            self.root.after(5000, self.watch_obs)
+        else:
+            run_in_background(self.root, obs.ping, done)
+
+    def resend(self):
+        """Send the current world again (e.g. after reconnecting or switching source)."""
+        if self.watcher:
+            self.watcher.last = None
+            run_in_background(self.root, self.watcher.check, lambda *_: None)
+
+    def toggle_auto_start(self):
+        self.cfg["auto_start"] = self.auto_start.get()
+        if gtworld.CONFIG_PATH.exists():
+            gtworld.save_config(self.cfg)
+
+    def toggle_login(self):
+        try:
+            gtworld.set_launch_at_login(self.login.get(), script=__file__)
+        except OSError as e:
+            self.login.set(not self.login.get())
+            self.set_status(self.obs_status, f"Couldn't change 'Open when I log in': {e}", "red")
 
     def create_source(self):
         name = self.source.get().strip() or "WorldText"
@@ -318,8 +381,7 @@ class App:
             return
         self.cfg["source_name"] = name
         gtworld.save_config(self.cfg)
-        self.watcher.last = None
-        run_in_background(self.root, self.watcher.check, lambda *_: None)
+        self.resend()
 
     def on_obs_source_event(self, obs, event, data):
         """Keep the dropdown and the running watcher in sync with sources added/removed in OBS."""
@@ -368,10 +430,9 @@ class App:
             self.start()
 
     def start(self):
-        cfg = self.current_cfg()
-        if not self.obs:
-            self.set_status(self.obs_status, "Connect to OBS first (step 1).", "red")
+        if self.watcher:
             return
+        cfg = self.current_cfg()
         if not cfg["source_name"]:
             self.set_status(self.obs_status, "Choose a text source (step 2).", "red")
             return
@@ -379,17 +440,18 @@ class App:
             return
         gtworld.save_config(cfg)
         self.cfg = cfg
-        obs = self.obs
 
         def on_change(text):  # runs on the watcher thread
-            try:
-                obs.set_text(self.cfg["source_name"], text)
-                ok = True
-            except Exception as e:
-                ok = False
-                print(f"Error updating OBS: {e}")
+            obs = self.obs  # whatever connection is current (None while OBS is away)
+            ok = False
+            if obs:
+                try:
+                    obs.set_text(self.cfg["source_name"], text)
+                    ok = True
+                except Exception as e:
+                    print(f"Error updating OBS: {e}")
             self.root.after(0, lambda: self.show_world(text, ok))
-            return ok  # False -> watcher retries on the next log write
+            return ok  # False -> retried on the next log write, and resent on reconnect
 
         self.watcher = gtworld.LogWatcher(cfg["log_path"], on_change, cfg["menu_text"], cfg["offline_text"])
         self.watcher.game_running = self.game_open is not False
@@ -402,6 +464,9 @@ class App:
         self.world.config(text=text)
         if ok:
             self.set_status(self.obs_status, f"✔ Live — '{self.cfg['source_name']}' shows: {text}", "green")
+        elif self.obs is None:
+            self.set_status(self.obs_status, f"Waiting for OBS — '{self.cfg['source_name']}' will update "
+                            "as soon as it connects.", "gray")
         else:
             self.set_status(self.obs_status, f"Couldn't update '{self.cfg['source_name']}' in OBS. "
                             "Is OBS still open and does the source exist?", "red")
@@ -426,19 +491,32 @@ def run_headless():
     if not gtworld.CONFIG_PATH.exists():
         sys.exit("No config.json yet — run without --headless once to set things up.")
     cfg = gtworld.load_config()
-    obs = gtworld.OBS(cfg["obs_host"], cfg["obs_port"], cfg["obs_password"])
-    obs.connect()
-    print(f"Connected to OBS. Watching {cfg['log_path']}  (Ctrl+C to stop)")
+    conn = {"obs": None}
+
+    def connect():
+        obs = gtworld.OBS(cfg["obs_host"], cfg["obs_port"], cfg["obs_password"])
+        try:
+            obs.connect()
+        except Exception as e:
+            print(f"Waiting for OBS ({e})")
+            return False
+        conn["obs"] = obs
+        print("Connected to OBS")
+        return True
 
     def on_change(text):
         print(f"[UPDATE] {text}")
+        if not conn["obs"]:
+            return False
         try:
-            obs.set_text(cfg["source_name"], text)
+            conn["obs"].set_text(cfg["source_name"], text)
             return True
         except Exception as e:
             print(f"Error updating OBS: {e}")
             return False
 
+    connect()
+    print(f"Watching {cfg['log_path']}  (Ctrl+C to stop)")
     watcher = gtworld.LogWatcher(cfg["log_path"], on_change, cfg["menu_text"], cfg["offline_text"])
     watcher.game_running = gtworld.is_growtopia_running() is not False
     watcher.start()
@@ -446,11 +524,22 @@ def run_headless():
         while True:
             time.sleep(3)
             watcher.set_game_running(gtworld.is_growtopia_running())
+            if conn["obs"]:
+                try:
+                    conn["obs"].ping()
+                except Exception:
+                    print("Lost connection to OBS - reconnecting...")
+                    conn["obs"].disconnect()
+                    conn["obs"] = None
+            if not conn["obs"] and connect():
+                watcher.last = None  # bring OBS up to date
+                watcher.check()
     except KeyboardInterrupt:
         pass
     finally:
         watcher.stop()
-        obs.disconnect()
+        if conn["obs"]:
+            conn["obs"].disconnect()
 
 
 if __name__ == "__main__":

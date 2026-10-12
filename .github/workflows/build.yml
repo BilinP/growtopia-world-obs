@@ -21,10 +21,10 @@ jobs:
         os: [windows-latest, macos-latest, ubuntu-latest]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.ref }}
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
       - run: python -m pip install -r requirements.txt
@@ -49,10 +49,10 @@ jobs:
     # Intel Mac runners are being phased out by GitHub; don't block a release on them.
     continue-on-error: ${{ matrix.artifact == 'macos-intel' }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.ref }}
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
       - run: python -m pip install -r requirements.txt pyinstaller
@@ -93,7 +93,7 @@ jobs:
           kill -0 "$pid" || { echo "App exited early"; exit 1; }
           kill "$pid"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: app-${{ matrix.artifact }}
           path: out/*

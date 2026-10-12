@@ -48,6 +48,7 @@ DEFAULT_CONFIG = {
     "log_path": "",
     "menu_text": "MENU",
     "offline_text": "NOT IN GAME",
+    "auto_start": True,  # start tracking as soon as the app opens (once set up)
 }
 
 # World name comes from the world load line.
@@ -164,6 +165,75 @@ def is_growtopia_running():
         return None
 
 
+# === Open at login ===
+
+LOGIN_ITEM_NAME = "GrowtopiaWorldOBS"
+
+
+def _launch_command(script):
+    """How to start this app minimised: the packaged executable, or Python + the script."""
+    if getattr(sys, "frozen", False):
+        return [sys.executable, "--minimized"]
+    python = Path(sys.executable)
+    if sys.platform.startswith("win") and (python.parent / "pythonw.exe").exists():
+        python = python.parent / "pythonw.exe"  # no console window
+    return [str(python), str(Path(script).resolve()), "--minimized"]
+
+
+def _login_item_path(name):
+    if sys.platform == "darwin":
+        return Path.home() / "Library" / "LaunchAgents" / f"com.growtopiaworldobs.{name}.plist"
+    return Path(os.getenv("XDG_CONFIG_HOME", Path.home() / ".config")) / "autostart" / f"{name}.desktop"
+
+
+def launch_at_login_enabled(name=LOGIN_ITEM_NAME):
+    if sys.platform.startswith("win"):
+        import winreg
+        try:
+            with winreg.OpenKey(winreg.HKEY_CURRENT_USER,
+                                r"Software\Microsoft\Windows\CurrentVersion\Run") as key:
+                winreg.QueryValueEx(key, name)
+            return True
+        except OSError:
+            return False
+    return _login_item_path(name).exists()
+
+
+def set_launch_at_login(enabled, script, name=LOGIN_ITEM_NAME):
+    """Add or remove this app from the programs that open when the user logs in."""
+    cmd = _launch_command(script)
+    if sys.platform.startswith("win"):
+        import subprocess
+        import winreg
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Software\Microsoft\Windows\CurrentVersion\Run",
+                            0, winreg.KEY_SET_VALUE) as key:
+            if enabled:
+                winreg.SetValueEx(key, name, 0, winreg.REG_SZ, subprocess.list2cmdline(cmd))
+            else:
+                try:
+                    winreg.DeleteValue(key, name)
+                except FileNotFoundError:
+                    pass
+        return
+    path = _login_item_path(name)
+    if not enabled:
+        try:
+            path.unlink()
+        except FileNotFoundError:
+            pass
+        return
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if sys.platform == "darwin":
+        import plistlib
+        with open(path, "wb") as f:
+            plistlib.dump({"Label": f"com.growtopiaworldobs.{name}", "ProgramArguments": cmd,
+                           "RunAtLoad": True}, f)
+    else:
+        import shlex
+        path.write_text("[Desktop Entry]\nType=Application\nName=Growtopia World OBS\n"
+                        f"Exec={' '.join(shlex.quote(c) for c in cmd)}\n", encoding="utf-8")
+
+
 # === Log parsing ===
 
 def read_log_lines(path):
@@ -235,6 +305,10 @@ class OBS:
             if name in ("InputCreated", "InputRemoved", "InputNameChanged"):
                 callback(name, event.datain)
         self.ws.register(handler)
+
+    def ping(self):
+        """Raises if OBS is no longer reachable."""
+        self._call(requests.GetVersion())
 
     def set_text(self, source, text):
         self._call(requests.SetInputSettings(inputName=source, inputSettings={"text": text}))

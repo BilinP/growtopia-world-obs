@@ -50,7 +50,13 @@ No Python or anything else to install. You also need
        and please open an issue saying where it was.
 4. Click **Save & Start**. The window and your OBS text now show your current world (or `MENU`).
 
-Your settings are saved automatically (see [Settings](#settings) for where), so next time you can just start the app and click **Save & Start**.
+Your settings are saved automatically (see [Settings](#settings) for where). After that it's hands-off:
+
+- **Start automatically when the app opens** (on by default): next time, just open the app and it
+  starts tracking. No clicks needed.
+- **Open when I log in to my computer**: the app also opens by itself (minimised) when you log in.
+- If OBS is closed or restarted, the app keeps tracking, reconnects as soon as OBS is back, and updates
+  the text straight away.
 
 ### Run without the window
 
@@ -79,6 +85,7 @@ On macOS: `./start-mac.command --headless`
 | `log_path`     | Path to Growtopia's `log.txt`                   | auto-detected |
 | `menu_text`    | Text shown when you're not in a world           | `MENU`        |
 | `offline_text` | Text shown while Growtopia is closed            | `NOT IN GAME` |
+| `auto_start`   | Start tracking as soon as the app opens         | `true`        |
 
 `config.json` contains your OBS password, so don't share it (it's in `.gitignore`).
 
@@ -110,7 +117,7 @@ the app currently detects. Join and leave worlds in Growtopia to see it change. 
 
 | Problem | Fix |
 |---|---|
-| "Couldn't connect" | Make sure OBS is open and the WebSocket server is enabled (Setup step 1). Check the port/password. |
+| "Waiting for OBS" | Make sure OBS is open and the WebSocket server is enabled (Setup step 1). Check the port/password. It retries every 5 seconds by itself. |
 | "Couldn't update … in OBS" | The text source was renamed or deleted. Pick or create it again in step 2. |
 | Log file not found | Start Growtopia at least once, or use **Browse…** to find `log.txt`. |
 | Text doesn't change | Growtopia only writes the log while it's running. Join a world and wait a second. |
