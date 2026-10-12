@@ -131,8 +131,19 @@ def test_launch_command_starts_minimised():
 
 
 if __name__ == "__main__":
+    import traceback
     tests = [(name, fn) for name, fn in sorted(globals().items()) if name.startswith("test_")]
+    failed = 0
     for name, fn in tests:
-        fn()
-        print(f"ok  {name}")
-    print(f"{len(tests)} tests passed")
+        try:
+            fn()
+            print(f"ok    {name}")
+        except Exception:
+            failed += 1
+            tb = traceback.format_exc()
+            print(f"FAIL  {name}\n{tb}")
+            if os.getenv("GITHUB_ACTIONS"):
+                # Shows on the run's summary page (readable without signing in)
+                print(f"::error title={name} failed on {sys.platform}::" + tb.strip().replace("\n", "%0A"))
+    print(f"{len(tests) - failed} passed, {failed} failed")
+    sys.exit(1 if failed else 0)

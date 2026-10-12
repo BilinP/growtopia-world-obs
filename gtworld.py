@@ -205,8 +205,9 @@ def set_launch_at_login(enabled, script, name=LOGIN_ITEM_NAME):
     if sys.platform.startswith("win"):
         import subprocess
         import winreg
-        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Software\Microsoft\Windows\CurrentVersion\Run",
-                            0, winreg.KEY_SET_VALUE) as key:
+        # CreateKeyEx also opens it; the Run key can be missing on a brand-new account.
+        with winreg.CreateKeyEx(winreg.HKEY_CURRENT_USER, r"Software\Microsoft\Windows\CurrentVersion\Run",
+                                0, winreg.KEY_SET_VALUE) as key:
             if enabled:
                 winreg.SetValueEx(key, name, 0, winreg.REG_SZ, subprocess.list2cmdline(cmd))
             else:
